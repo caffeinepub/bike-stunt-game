@@ -121,7 +121,7 @@ const AIR_FRICTION = 0.998;
 const CHUNK_WIDTH = 900;
 const PARTICLE_POOL_SIZE = 250;
 const BOOST_AMOUNT = 180;
-const MIN_AIRTIME_STUNT = 1.0;
+const _MIN_AIRTIME_STUNT = 1.0;
 const MIN_WHEELIE_TIME = 0.5;
 const FLIP_THRESHOLD = Math.PI * 2;
 
@@ -776,7 +776,7 @@ export default function BikeGame() {
 
       // Landing
       if (wasAirborne && (rearContact || frontContact)) {
-        const airSecs = state.airTimeAccum;
+        const _airSecs = state.airTimeAccum;
 
         // Check flips
         const flips = Math.floor(
@@ -796,21 +796,8 @@ export default function BikeGame() {
           }
         }
 
-        // Big air
-        if (airSecs >= MIN_AIRTIME_STUNT) {
-          const pts = Math.floor(50 * airSecs * state.combo);
-          state.score += pts;
-          const name = airSecs > 3 ? `HUGE AIR! +${pts}` : `BIG AIR! +${pts}`;
-          addStuntBanner(state, name, "#ffff00");
-          recordStunt(state, airSecs > 3 ? "HUGE AIR" : "BIG AIR");
-        }
-
         // Combo: if no stunts, reset
-        if (
-          flips === 0 &&
-          airSecs < MIN_AIRTIME_STUNT &&
-          state.wheelieTimer < MIN_WHEELIE_TIME
-        ) {
+        if (flips === 0 && state.wheelieTimer < MIN_WHEELIE_TIME) {
           state.combo = Math.max(1, state.combo - 0);
         }
 
@@ -1406,13 +1393,13 @@ export default function BikeGame() {
     // HUD background panel
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.beginPath();
-    ctx.roundRect(16, 16, 220, 120, 8);
+    ctx.roundRect(16, 16, 220, 100, 8);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(16, 16, 220, 120, 8);
+    ctx.roundRect(16, 16, 220, 100, 8);
     ctx.stroke();
 
     ctx.font = "bold 13px 'Geist Mono', monospace";
@@ -1430,11 +1417,6 @@ export default function BikeGame() {
         label: "HEIGHT",
         value: `${Math.floor(state.height)}m`,
         color: "#ffff00",
-      },
-      {
-        label: "AIR",
-        value: `${state.currentAirTime.toFixed(1)}s`,
-        color: "#ff6600",
       },
     ];
 
