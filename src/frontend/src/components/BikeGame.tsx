@@ -837,7 +837,6 @@ export default function BikeGame({
               state.stuntsPerformed[state.stuntsPerformed.length - 1] !==
               "WHEELIE!"
             ) {
-              addStuntBanner(state, "WHEELIE!", "#ff00ff");
               recordStunt(state, "WHEELIE!");
             }
           }
@@ -860,10 +859,6 @@ export default function BikeGame({
             const pts = 500 * state.combo;
             state.score += pts;
             state.combo = Math.min(10, state.combo + 1);
-            const name = isBackflip
-              ? `BACKFLIP! x${state.combo}`
-              : `FRONTFLIP! x${state.combo}`;
-            addStuntBanner(state, name, "#00ffff");
             recordStunt(state, isBackflip ? "BACKFLIP" : "FRONTFLIP");
           }
         }
@@ -1024,7 +1019,9 @@ export default function BikeGame({
       else if (currentLvl >= 11 && currentLvl <= 20) levelDiffMult = 1.5;
       else if (currentLvl >= 21) levelDiffMult = 2.0;
       state.difficulty = (state.distance / 2000) * levelDiffMult;
-      state.score += Math.floor(state.bike.vel.x * dt * 0.05);
+      // Distance-based score: rate increases the farther you go
+      const distanceFactor = 1 + state.distance / 3000;
+      state.score += Math.floor(state.bike.vel.x * dt * 0.05 * distanceFactor);
 
       // Level system disabled
 
