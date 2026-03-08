@@ -102,6 +102,7 @@ export default function App() {
           level={currentLevel}
           onLevelUp={handleLevelUp}
           onBackToMenu={() => setScreen("menu")}
+          selectedVehicleId={selectedVehicleId}
         />
       )}
     </div>

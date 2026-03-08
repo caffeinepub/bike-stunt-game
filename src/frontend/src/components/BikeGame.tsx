@@ -485,7 +485,7 @@ function generateInitialTerrain(canvasH: number): TerrainSegment[] {
   // Generate subsequent chunks
   let genX = 400;
   let lastY = startY;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 12; i++) {
     const newChunks = generateChunk(genX, i / 3, lastY);
     for (const c of newChunks) {
       if (!c.isGap && c.points.length > 0) {
@@ -539,6 +539,7 @@ interface BikeGameProps {
   level?: number;
   onLevelUp?: () => void;
   onBackToMenu?: () => void;
+  selectedVehicleId?: string;
 }
 
 // ─── Main BikeGame Component ──────────────────────────────────────────────────
@@ -547,6 +548,7 @@ export default function BikeGame({
   level = 1,
   onLevelUp,
   onBackToMenu,
+  selectedVehicleId = "bike_street",
 }: BikeGameProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState | null>(null);
@@ -564,6 +566,7 @@ export default function BikeGame({
   const rainRef = useRef<RainParticle[]>([]);
   const levelRef = useRef(level);
   const onLevelUpRef = useRef(onLevelUp);
+  const vehicleIdRef = useRef(selectedVehicleId);
 
   const [gameEndData, setGameEndData] = useState<GameEndData | null>(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -572,6 +575,7 @@ export default function BikeGame({
   // Keep refs in sync with props
   levelRef.current = level;
   onLevelUpRef.current = onLevelUp;
+  vehicleIdRef.current = selectedVehicleId;
 
   // When level changes (after level-up), update mission distance for next run
   useEffect(() => {
@@ -992,13 +996,7 @@ export default function BikeGame({
         if (state.particles[i].life <= 0) state.particles.splice(i, 1);
       }
 
-      // Update stunt banners
-      for (const banner of state.stuntBanners) {
-        banner.timer -= dt;
-      }
-      for (let i = state.stuntBanners.length - 1; i >= 0; i--) {
-        if (state.stuntBanners[i].timer <= 0) state.stuntBanners.splice(i, 1);
-      }
+      // Stunt banners removed per user request
 
       // Check boost pickups
       for (const boost of state.boosts) {
@@ -1025,31 +1023,10 @@ export default function BikeGame({
       if (currentLvl >= 6 && currentLvl <= 10) levelDiffMult = 1.0;
       else if (currentLvl >= 11 && currentLvl <= 20) levelDiffMult = 1.5;
       else if (currentLvl >= 21) levelDiffMult = 2.0;
-      state.difficulty = (state.distance / 3000) * levelDiffMult;
+      state.difficulty = (state.distance / 2000) * levelDiffMult;
       state.score += Math.floor(state.bike.vel.x * dt * 0.05);
 
-      // Level-up banner countdown
-      if (state.leveledUp) {
-        state.levelUpTimer -= dt;
-        if (state.levelUpTimer <= 0) state.leveledUp = false;
-      }
-
-      // Check mission complete → level up
-      if (
-        state.missionDistance > 0 &&
-        state.distance >= state.missionDistance &&
-        !state.leveledUp
-      ) {
-        state.leveledUp = true;
-        state.levelUpTimer = 3.0;
-        state.levelUpLevel = currentLvl + 1;
-        // Give score bonus
-        state.score += 2000 * currentLvl;
-        onLevelUpRef.current?.();
-        // Reset mission distance for next level (next level handled via prop update)
-        state.missionDistance = 0; // prevent repeated fires; App will update level prop
-        addStuntBanner(state, `LEVEL UP! LVL ${currentLvl + 1} 🏆`, "#ffd700");
-      }
+      // Level system disabled
 
       // ── Obstacle generation (Level 11+) ─────────────────────────────────────
       if (currentLvl >= 11) {
@@ -1119,8 +1096,9 @@ export default function BikeGame({
       const canvasMidY = canvas.height * 0.5;
       state.height = Math.max(0, (canvasMidY - state.bike.pos.y) * 0.05);
 
-      // Generate more terrain ahead
-      const lookAhead = state.bike.pos.x + canvas.width * 2;
+      // Generate more terrain ahead — lookahead scales with score for variety
+      const scoreBonus = Math.min(4, 1 + state.score / 2000);
+      const lookAhead = state.bike.pos.x + canvas.width * 2 * scoreBonus;
       if (lookAhead > state.terrainGenX - CHUNK_WIDTH) {
         const lastChunk = state.terrainChunks[state.terrainChunks.length - 1];
         const lastY =
@@ -1188,7 +1166,7 @@ export default function BikeGame({
       }
 
       // Render
-      render(canvas, state, timestamp, levelRef.current);
+      render(canvas, state, timestamp, levelRef.current, vehicleIdRef.current);
 
       animFrameRef.current = requestAnimationFrame(update);
     },
@@ -1222,6 +1200,7 @@ export default function BikeGame({
     state: GameState,
     timestamp: number,
     currentLvl: number,
+    vehicleId = "bike_street",
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -1289,8 +1268,8 @@ export default function BikeGame({
     // Draw particles
     drawParticles(ctx, state);
 
-    // Draw bike
-    drawBike(ctx, state.bike);
+    // Draw bike / vehicle
+    drawBike(ctx, state.bike, vehicleId);
 
     ctx.restore();
 
@@ -1455,7 +1434,23 @@ export default function BikeGame({
     ctx.shadowBlur = 0;
   }
 
-  function drawBike(ctx: CanvasRenderingContext2D, bike: BikeState) {
+  function drawBike(
+    ctx: CanvasRenderingContext2D,
+    bike: BikeState,
+    vehicleId = "bike_street",
+  ) {
+    const isTruck = vehicleId.startsWith("truck");
+    const isCar = vehicleId.startsWith("car");
+
+    if (isTruck) {
+      drawTruck(ctx, bike, vehicleId);
+      return;
+    }
+    if (isCar) {
+      drawCar(ctx, bike, vehicleId);
+      return;
+    }
+
     ctx.save();
     ctx.translate(bike.pos.x, bike.pos.y);
     ctx.rotate(bike.angle);
@@ -1514,6 +1509,253 @@ export default function BikeGame({
     ctx.save();
     drawWheel(ctx, bike.rearWheelPos, bike.rearWheelRot);
     drawWheel(ctx, bike.frontWheelPos, bike.frontWheelRot);
+    ctx.restore();
+  }
+
+  function drawCar(
+    ctx: CanvasRenderingContext2D,
+    bike: BikeState,
+    vehicleId: string,
+  ) {
+    // Color scheme by car type
+    let frameColor = "#00ffff";
+    let accentColor = "#ff00ff";
+    if (vehicleId === "car_sport") {
+      frameColor = "#ff6600";
+      accentColor = "#ffff00";
+    }
+    if (vehicleId === "car_super") {
+      frameColor = "#ff00ff";
+      accentColor = "#00ffff";
+    }
+
+    ctx.save();
+    ctx.translate(bike.pos.x, bike.pos.y);
+    ctx.rotate(bike.angle);
+
+    const hw = 36; // half width
+    const bodyTop = -20;
+    const bodyBottom = 2;
+    const cabTop = -36;
+
+    // Car body (lower)
+    ctx.shadowColor = frameColor;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = "#0a1020";
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.roundRect(-hw, bodyTop, hw * 2, bodyBottom - bodyTop, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cabin (upper)
+    ctx.fillStyle = "#0d1830";
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-hw * 0.55, cabTop, hw * 1.1, bodyTop - cabTop, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    // Windshield
+    ctx.fillStyle = "rgba(0,200,255,0.18)";
+    ctx.strokeStyle = "rgba(0,200,255,0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(-hw * 0.5 + 3, cabTop + 4, hw - 6, bodyTop - cabTop - 8, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    // Headlights
+    ctx.fillStyle = "#ffffaa";
+    ctx.shadowColor = "#ffff00";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.ellipse(hw - 4, bodyTop + 5, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Tail lights
+    ctx.fillStyle = "#ff2200";
+    ctx.shadowColor = "#ff0000";
+    ctx.beginPath();
+    ctx.ellipse(-hw + 4, bodyTop + 5, 4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // Wheels
+    ctx.save();
+    drawWheel(ctx, bike.rearWheelPos, bike.rearWheelRot);
+    drawWheel(ctx, bike.frontWheelPos, bike.frontWheelRot);
+    ctx.restore();
+  }
+
+  function drawTruck(
+    ctx: CanvasRenderingContext2D,
+    bike: BikeState,
+    vehicleId: string,
+  ) {
+    // Color by truck type
+    let frameColor = "#ff6600";
+    let cabColor = "#1a1a2e";
+    let accentColor = "#ff6600";
+    if (vehicleId === "truck_monster") {
+      frameColor = "#ff0055";
+      accentColor = "#ff0055";
+    }
+    if (vehicleId === "truck_cyber") {
+      frameColor = "#00ffff";
+      cabColor = "#0a0a20";
+      accentColor = "#00ffff";
+    }
+
+    ctx.save();
+    ctx.translate(bike.pos.x, bike.pos.y);
+    ctx.rotate(bike.angle);
+
+    const cabHW = 22;
+    const trailerHW = 44;
+    const bodyTop = -22;
+    const bodyBottom = 4;
+    const cabTop = -42;
+
+    // Trailer (rear)
+    ctx.shadowColor = accentColor;
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = "#0d1020";
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(
+      -trailerHW,
+      bodyTop,
+      trailerHW + cabHW * 0.3,
+      bodyBottom - bodyTop,
+      3,
+    );
+    ctx.fill();
+    ctx.stroke();
+
+    // Cab (front)
+    ctx.fillStyle = cabColor;
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = frameColor;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.roundRect(
+      cabHW * 0.3 - cabHW,
+      cabTop,
+      cabHW * 2,
+      bodyBottom - cabTop,
+      5,
+    );
+    ctx.fill();
+    ctx.stroke();
+
+    // Cab window
+    ctx.fillStyle = "rgba(0,180,255,0.2)";
+    ctx.strokeStyle = "rgba(0,180,255,0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(
+      cabHW * 0.3 - cabHW + 4,
+      cabTop + 5,
+      cabHW * 2 - 8,
+      bodyTop - cabTop - 8,
+      3,
+    );
+    ctx.fill();
+    ctx.stroke();
+
+    // Headlights
+    ctx.fillStyle = "#ffffaa";
+    ctx.shadowColor = "#ffff00";
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.ellipse(
+      cabHW + cabHW * 0.3 - 3,
+      bodyTop + 6,
+      5,
+      3.5,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    // Exhaust pipe (top of cab)
+    ctx.strokeStyle = accentColor;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = accentColor;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(cabHW * 0.3 + 4, cabTop - 2);
+    ctx.lineTo(cabHW * 0.3 + 4, cabTop + 10);
+    ctx.stroke();
+
+    // Truck label on trailer
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = accentColor;
+    ctx.font = "bold 8px Geist Mono, monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TRUCK", -trailerHW * 0.5, (bodyTop + bodyBottom) / 2);
+    ctx.textAlign = "left";
+
+    ctx.restore();
+
+    // Big truck wheels (larger)
+    ctx.save();
+    drawTruckWheel(ctx, bike.rearWheelPos, bike.rearWheelRot, accentColor);
+    drawTruckWheel(ctx, bike.frontWheelPos, bike.frontWheelRot, accentColor);
+    ctx.restore();
+  }
+
+  function drawTruckWheel(
+    ctx: CanvasRenderingContext2D,
+    pos: Vec2,
+    rotation: number,
+    rimColor: string,
+  ) {
+    const R = WHEEL_RADIUS + 5; // bigger than bike wheel
+    ctx.save();
+    ctx.translate(pos.x, pos.y);
+
+    ctx.shadowColor = "#000000";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "#111122";
+    ctx.beginPath();
+    ctx.arc(0, 0, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = rimColor;
+    ctx.lineWidth = 4;
+    ctx.shadowColor = rimColor;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(0, 0, R - 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Spokes
+    ctx.strokeStyle = rimColor;
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 8; i++) {
+      const angle = rotation + (i / 8) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(angle) * (R - 3), Math.sin(angle) * (R - 3));
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#ff6600";
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.restore();
   }
 
@@ -1628,51 +1870,21 @@ export default function BikeGame({
     W: number,
     _H: number,
     _timestamp: number,
-    currentLvl = 1,
+    _currentLvl = 1,
   ) {
     // HUD background panel
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.beginPath();
-    ctx.roundRect(16, 16, 240, 120, 8);
+    ctx.roundRect(16, 16, 240, 80, 8);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(16, 16, 240, 120, 8);
+    ctx.roundRect(16, 16, 240, 80, 8);
     ctx.stroke();
 
     ctx.font = "bold 13px 'Geist Mono', monospace";
-    ctx.shadowBlur = 0;
-
-    // Level display
-    const lvlColor =
-      currentLvl >= 21
-        ? "#ff0040"
-        : currentLvl >= 11
-          ? "#ff6600"
-          : currentLvl >= 6
-            ? "#ffff00"
-            : "#39ff14";
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.fillText("LVL:", 28, 36);
-    ctx.fillStyle = lvlColor;
-    ctx.shadowColor = lvlColor;
-    ctx.shadowBlur = 6;
-    ctx.fillText(`${currentLvl}`, 80, 36);
-    ctx.shadowBlur = 0;
-
-    // Mission distance
-    const mDist =
-      state.missionDistance > 0 ? state.missionDistance : currentLvl * 800;
-    const distTraveled = Math.floor(state.distance / 10);
-    const distTarget = Math.floor(mDist / 10);
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.fillText("DIST:", 28, 56);
-    ctx.fillStyle = distTraveled >= distTarget ? "#39ff14" : COLOR_HUD;
-    ctx.shadowColor = distTraveled >= distTarget ? "#39ff14" : COLOR_HUD;
-    ctx.shadowBlur = 5;
-    ctx.fillText(`${distTraveled}m/${distTarget}m`, 80, 56);
     ctx.shadowBlur = 0;
 
     const lines = [
@@ -1686,7 +1898,7 @@ export default function BikeGame({
     ];
 
     lines.forEach((line, i) => {
-      const y = 76 + i * 20;
+      const y = 36 + i * 20;
       ctx.fillStyle = "rgba(255,255,255,0.4)";
       ctx.fillText(`${line.label}:`, 28, y);
       ctx.fillStyle = line.color;
@@ -1709,32 +1921,6 @@ export default function BikeGame({
       ctx.globalAlpha = 1;
     }
 
-    // Stunt banners
-    const bannerBaseY = 80;
-    let bannerY = bannerBaseY;
-    for (const banner of state.stuntBanners) {
-      const progress = banner.timer / banner.maxTimer;
-      const alpha = Math.min(1, progress * 3);
-      const scale = 1 + (1 - progress) * 0.1;
-
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(W / 2, bannerY);
-      ctx.scale(scale, scale);
-
-      // Shadow/glow
-      ctx.shadowColor = banner.color;
-      ctx.shadowBlur = 25;
-      ctx.font = "bold 28px 'Bricolage Grotesque', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = banner.color;
-      ctx.fillText(banner.text, 0, 0);
-      ctx.shadowBlur = 0;
-
-      ctx.restore();
-      bannerY += 44;
-    }
     ctx.textAlign = "left";
 
     // Controls overlay
@@ -1784,44 +1970,6 @@ export default function BikeGame({
       ctx.fillText("Do flips and stunts for big scores!", W / 2, _H / 2 + 88);
 
       ctx.restore();
-      ctx.textAlign = "left";
-    }
-
-    // Level-up banner
-    if (state.leveledUp) {
-      const progress = state.levelUpTimer / 3.0;
-      const alpha = Math.min(1, progress * 2);
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.translate(W / 2, _H / 2 - 60);
-      const bannerScale = 1 + (1 - progress) * 0.2;
-      ctx.scale(bannerScale, bannerScale);
-      ctx.shadowColor = "#ffd700";
-      ctx.shadowBlur = 40;
-      ctx.font = "bold 42px 'Bricolage Grotesque', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#ffd700";
-      ctx.fillText("🏆 LEVEL UP!", 0, -20);
-      ctx.font = "bold 28px 'Bricolage Grotesque', sans-serif";
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText(`LEVEL ${state.levelUpLevel}`, 0, 22);
-      ctx.restore();
-      ctx.textAlign = "left";
-    }
-
-    // Night/rain mode indicator
-    if (currentLvl >= 21) {
-      ctx.font = "11px 'Geist Mono', monospace";
-      ctx.fillStyle = "rgba(0,136,255,0.7)";
-      ctx.textAlign = "right";
-      ctx.fillText("🌧 NIGHT MODE", W - 20, 52);
-      ctx.textAlign = "left";
-    } else if (currentLvl >= 11) {
-      ctx.font = "11px 'Geist Mono', monospace";
-      ctx.fillStyle = "rgba(255,102,0,0.7)";
-      ctx.textAlign = "right";
-      ctx.fillText("⚠ TRAFFIC AHEAD", W - 20, 52);
       ctx.textAlign = "left";
     }
   }

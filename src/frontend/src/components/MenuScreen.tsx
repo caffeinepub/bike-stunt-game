@@ -11,7 +11,7 @@ interface MenuScreenProps {
 }
 
 export default function MenuScreen({
-  currentLevel,
+  currentLevel: _currentLevel,
   isPremium,
   onStartGame,
   onGarage,
@@ -99,15 +99,6 @@ export default function MenuScreen({
     };
   }, []);
 
-  const getLevelTier = () => {
-    if (currentLevel <= 5) return { label: "EASY", color: "#39ff14" };
-    if (currentLevel <= 10) return { label: "MEDIUM", color: "#ffff00" };
-    if (currentLevel <= 20) return { label: "HARD", color: "#ff6600" };
-    return { label: "EXTREME", color: "#ff0040" };
-  };
-
-  const tier = getLevelTier();
-
   return (
     <div
       style={{
@@ -132,64 +123,6 @@ export default function MenuScreen({
           pointerEvents: "none",
         }}
       />
-
-      {/* Level badge - top left */}
-      <div
-        style={{
-          position: "absolute",
-          top: 20,
-          left: 20,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "flex-start",
-          gap: 2,
-          zIndex: 10,
-        }}
-      >
-        <div
-          style={{
-            padding: "6px 14px",
-            background: "rgba(0,0,0,0.7)",
-            border: `1.5px solid ${tier.color}`,
-            borderRadius: 8,
-            boxShadow: `0 0 12px ${tier.color}55`,
-          }}
-        >
-          <span
-            style={{
-              fontFamily: "Geist Mono, monospace",
-              fontSize: 11,
-              color: "rgba(255,255,255,0.5)",
-              letterSpacing: "0.1em",
-            }}
-          >
-            CURRENT
-          </span>
-          <div
-            style={{
-              fontFamily: "Bricolage Grotesque, sans-serif",
-              fontWeight: 900,
-              fontSize: 20,
-              color: tier.color,
-              textShadow: `0 0 10px ${tier.color}`,
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-            }}
-          >
-            LEVEL {currentLevel}
-          </div>
-          <span
-            style={{
-              fontFamily: "Geist Mono, monospace",
-              fontSize: 10,
-              color: tier.color,
-              opacity: 0.8,
-            }}
-          >
-            {tier.label}
-          </span>
-        </div>
-      </div>
 
       {/* Premium badge - top right */}
       {isPremium && (
