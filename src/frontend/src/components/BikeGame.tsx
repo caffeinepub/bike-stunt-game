@@ -1,4 +1,4 @@
-import { Volume2, VolumeX } from "lucide-react";
+import { Menu, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useIsMobile } from "../hooks/use-mobile";
 import { useSoundEngine } from "../hooks/useSoundEngine";
@@ -45,6 +45,21 @@ interface StuntBanner {
   color: string;
 }
 
+interface Obstacle {
+  pos: Vec2;
+  width: number;
+  height: number;
+  type: "police" | "truck";
+  passed: boolean;
+}
+
+interface RainParticle {
+  x: number;
+  y: number;
+  len: number;
+  speed: number;
+}
+
 interface BikeState {
   pos: Vec2;
   vel: Vec2;
@@ -63,6 +78,7 @@ interface GameState {
   particles: Particle[];
   terrainChunks: TerrainSegment[];
   boosts: Boost[];
+  obstacles: Obstacle[];
   camera: Vec2;
   cameraTarget: Vec2;
   score: number;
@@ -70,6 +86,10 @@ interface GameState {
   maxCombo: number;
   isGameOver: boolean;
   distance: number;
+  missionDistance: number;
+  leveledUp: boolean;
+  levelUpTimer: number;
+  levelUpLevel: number;
   stuntsPerformed: string[];
   rotationAccum: number;
   wheelieTimer: number;
@@ -88,6 +108,7 @@ interface GameState {
   difficulty: number;
   terrainGenX: number;
   pendingFlips: number;
+  obstacleGenX: number;
 }
 
 interface Keys {
@@ -127,8 +148,10 @@ const FLIP_THRESHOLD = Math.PI * 2;
 
 // Colors (literal values since canvas can't use CSS vars)
 const COLOR_BG = "#0a0a0f";
+const COLOR_BG_NIGHT = "#020208";
 const _COLOR_TERRAIN_FILL = "#0d1f0d";
 const COLOR_TERRAIN_OUTLINE = "#39ff14";
+const COLOR_TERRAIN_OUTLINE_NIGHT = "#0088ff";
 const COLOR_BIKE_FRAME = "#00ffff";
 const COLOR_BIKE_ACCENT = "#ff00ff";
 const COLOR_WHEEL_RIM = "#ffff00";
@@ -415,6 +438,7 @@ function createInitialState(canvasW: number, canvasH: number): GameState {
     particles,
     terrainChunks: startChunks,
     boosts: generateBoosts(startChunks),
+    obstacles: [],
     camera: { x: 120 - canvasW * 0.3, y: startY - canvasH * 0.4 },
     cameraTarget: { x: 120 - canvasW * 0.3, y: startY - canvasH * 0.4 },
     score: 0,
@@ -422,6 +446,10 @@ function createInitialState(canvasW: number, canvasH: number): GameState {
     maxCombo: 1,
     isGameOver: false,
     distance: 0,
+    missionDistance: 0,
+    leveledUp: false,
+    levelUpTimer: 0,
+    levelUpLevel: 1,
     stuntsPerformed: [],
     rotationAccum: 0,
     wheelieTimer: 0,
@@ -440,6 +468,7 @@ function createInitialState(canvasW: number, canvasH: number): GameState {
     difficulty: 0,
     terrainGenX: 0,
     pendingFlips: 0,
+    obstacleGenX: 800,
   };
 }
 
@@ -504,9 +533,21 @@ function recordStunt(state: GameState, name: string) {
   }
 }
 
+// ─── BikeGame Props ───────────────────────────────────────────────────────────
+
+interface BikeGameProps {
+  level?: number;
+  onLevelUp?: () => void;
+  onBackToMenu?: () => void;
+}
+
 // ─── Main BikeGame Component ──────────────────────────────────────────────────
 
-export default function BikeGame() {
+export default function BikeGame({
+  level = 1,
+  onLevelUp,
+  onBackToMenu,
+}: BikeGameProps = {}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stateRef = useRef<GameState | null>(null);
   const keysRef = useRef<Keys>({
@@ -520,10 +561,27 @@ export default function BikeGame() {
   const starsRef = useRef<
     { x: number; y: number; size: number; brightness: number }[]
   >([]);
+  const rainRef = useRef<RainParticle[]>([]);
+  const levelRef = useRef(level);
+  const onLevelUpRef = useRef(onLevelUp);
 
   const [gameEndData, setGameEndData] = useState<GameEndData | null>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const isMobile = useIsMobile();
+
+  // Keep refs in sync with props
+  levelRef.current = level;
+  onLevelUpRef.current = onLevelUp;
+
+  // When level changes (after level-up), update mission distance for next run
+  useEffect(() => {
+    const state = stateRef.current;
+    if (!state) return;
+    // Reset only the mission distance — keep bike position so player continues forward
+    state.missionDistance = level * 800;
+    state.distance = 0;
+    state.leveledUp = false;
+  }, [level]);
 
   // Sound engine
   const {
@@ -547,6 +605,8 @@ export default function BikeGame() {
     stateRef.current = state;
     state.terrainGenX =
       state.terrainChunks[state.terrainChunks.length - 1]?.endX ?? 0;
+    // Set mission distance based on current level
+    state.missionDistance = levelRef.current * 800;
     wasAirborneRef.current = false;
     setGameEndData(null);
     setShowOverlay(false);
@@ -557,6 +617,14 @@ export default function BikeGame() {
       y: Math.random() * 600 - 300,
       size: Math.random() * 1.5 + 0.3,
       brightness: 0.3 + Math.random() * 0.7,
+    }));
+
+    // Generate rain particles (used at level 21+)
+    rainRef.current = Array.from({ length: 120 }, () => ({
+      x: Math.random() * 2000,
+      y: Math.random() * 1000,
+      len: 10 + Math.random() * 14,
+      speed: 400 + Math.random() * 200,
     }));
   }, []);
 
@@ -951,8 +1019,100 @@ export default function BikeGame() {
 
       // Distance and difficulty
       state.distance = Math.max(state.distance, state.bike.pos.x);
-      state.difficulty = state.distance / 3000;
+      // Level-based difficulty multiplier
+      const currentLvl = levelRef.current;
+      let levelDiffMult = 0.5;
+      if (currentLvl >= 6 && currentLvl <= 10) levelDiffMult = 1.0;
+      else if (currentLvl >= 11 && currentLvl <= 20) levelDiffMult = 1.5;
+      else if (currentLvl >= 21) levelDiffMult = 2.0;
+      state.difficulty = (state.distance / 3000) * levelDiffMult;
       state.score += Math.floor(state.bike.vel.x * dt * 0.05);
+
+      // Level-up banner countdown
+      if (state.leveledUp) {
+        state.levelUpTimer -= dt;
+        if (state.levelUpTimer <= 0) state.leveledUp = false;
+      }
+
+      // Check mission complete → level up
+      if (
+        state.missionDistance > 0 &&
+        state.distance >= state.missionDistance &&
+        !state.leveledUp
+      ) {
+        state.leveledUp = true;
+        state.levelUpTimer = 3.0;
+        state.levelUpLevel = currentLvl + 1;
+        // Give score bonus
+        state.score += 2000 * currentLvl;
+        onLevelUpRef.current?.();
+        // Reset mission distance for next level (next level handled via prop update)
+        state.missionDistance = 0; // prevent repeated fires; App will update level prop
+        addStuntBanner(state, `LEVEL UP! LVL ${currentLvl + 1} 🏆`, "#ffd700");
+      }
+
+      // ── Obstacle generation (Level 11+) ─────────────────────────────────────
+      if (currentLvl >= 11) {
+        const obstacleDensity =
+          currentLvl >= 21 ? 0.6 : currentLvl >= 11 ? 0.4 : 0;
+        const spawnInterval = Math.max(300, 800 - (currentLvl - 11) * 20);
+        while (state.obstacleGenX < state.bike.pos.x + canvas.width * 2.5) {
+          if (Math.random() < obstacleDensity) {
+            // Find terrain Y at that position
+            const terrainY = getTerrainY(
+              state.obstacleGenX,
+              state.terrainChunks,
+            );
+            if (
+              terrainY !== null &&
+              !isInGap(state.obstacleGenX, state.terrainChunks)
+            ) {
+              const isPolice = Math.random() < 0.5;
+              state.obstacles.push({
+                pos: {
+                  x: state.obstacleGenX,
+                  y: terrainY - (isPolice ? 25 : 30),
+                },
+                width: isPolice ? 40 : 55,
+                height: isPolice ? 25 : 30,
+                type: isPolice ? "police" : "truck",
+                passed: false,
+              });
+            }
+          }
+          state.obstacleGenX += spawnInterval + Math.random() * 200;
+        }
+
+        // Remove obstacles behind camera
+        state.obstacles = state.obstacles.filter(
+          (o) => o.pos.x > state.camera.x - 200,
+        );
+
+        // Collision detection
+        const bx = state.bike.pos.x;
+        const by = state.bike.pos.y;
+        const bikeHalfW = 30;
+        const bikeHalfH = 25;
+        for (const obs of state.obstacles) {
+          if (obs.passed) continue;
+          if (obs.pos.x < state.camera.x - 100) {
+            obs.passed = true;
+            continue;
+          }
+          // AABB check
+          const obsRight = obs.pos.x + obs.width;
+          const obsBottom = obs.pos.y + obs.height;
+          if (
+            bx + bikeHalfW > obs.pos.x &&
+            bx - bikeHalfW < obsRight &&
+            by + bikeHalfH > obs.pos.y &&
+            by - bikeHalfH < obsBottom
+          ) {
+            triggerGameOver(state);
+            return;
+          }
+        }
+      }
 
       // Speed / height
       state.speed = Math.abs(state.bike.vel.x) * 0.06; // convert to km/h rough
@@ -1028,7 +1188,7 @@ export default function BikeGame() {
       }
 
       // Render
-      render(canvas, state, timestamp);
+      render(canvas, state, timestamp, levelRef.current);
 
       animFrameRef.current = requestAnimationFrame(update);
     },
@@ -1061,23 +1221,27 @@ export default function BikeGame() {
     canvas: HTMLCanvasElement,
     state: GameState,
     timestamp: number,
+    currentLvl: number,
   ) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const W = canvas.width;
     const H = canvas.height;
     const cam = state.camera;
+    const isNight = currentLvl >= 21;
+    const hasRain = currentLvl >= 21;
+    const dt = 1 / 60; // approximate for rain animation
 
     // Clear
-    ctx.fillStyle = COLOR_BG;
+    ctx.fillStyle = isNight ? COLOR_BG_NIGHT : COLOR_BG;
     ctx.fillRect(0, 0, W, H);
 
-    // Draw stars (parallax)
+    // Draw stars (parallax) — brighter at night
     ctx.save();
     for (const star of starsRef.current) {
       const sx = (((star.x - cam.x * 0.1) % W) + W) % W;
       const sy = (((star.y - cam.y * 0.05) % H) + H) % H;
-      ctx.globalAlpha = star.brightness;
+      ctx.globalAlpha = isNight ? star.brightness : star.brightness * 0.7;
       ctx.fillStyle = COLOR_STARS;
       ctx.beginPath();
       ctx.arc(sx, sy, star.size, 0, Math.PI * 2);
@@ -1086,12 +1250,38 @@ export default function BikeGame() {
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    // Rain (Level 21+)
+    if (hasRain) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(180,220,255,0.28)";
+      ctx.lineWidth = 1;
+      for (const drop of rainRef.current) {
+        // Animate rain drop in screen space (scroll with camera roughly)
+        drop.x -= 0.8;
+        drop.y += drop.speed * dt;
+        if (drop.y > H) {
+          drop.y = -drop.len;
+          drop.x = Math.random() * W;
+        }
+        ctx.beginPath();
+        ctx.moveTo(drop.x, drop.y);
+        ctx.lineTo(drop.x - drop.len * 0.4, drop.y + drop.len);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Camera transform
     ctx.save();
     ctx.translate(-cam.x, -cam.y);
 
     // Draw terrain
-    drawTerrain(ctx, state, W, H);
+    drawTerrain(ctx, state, W, H, isNight);
+
+    // Draw obstacles
+    if (currentLvl >= 11) {
+      drawObstacles(ctx, state);
+    }
 
     // Draw boosts
     drawBoosts(ctx, state, timestamp);
@@ -1105,7 +1295,52 @@ export default function BikeGame() {
     ctx.restore();
 
     // HUD (screen space)
-    drawHUD(ctx, state, W, H, timestamp);
+    drawHUD(ctx, state, W, H, timestamp, currentLvl);
+  }
+
+  function drawObstacles(ctx: CanvasRenderingContext2D, state: GameState) {
+    for (const obs of state.obstacles) {
+      if (obs.passed) continue;
+      const { x, y } = obs.pos;
+      const { width, height } = obs;
+
+      if (obs.type === "police") {
+        // Police car: red/blue rect
+        ctx.fillStyle = "#cc0022";
+        ctx.shadowColor = "#ff0040";
+        ctx.shadowBlur = 10;
+        ctx.fillRect(x, y, width, height);
+        ctx.shadowBlur = 0;
+        // Roof lights
+        ctx.fillStyle = "#0044ff";
+        ctx.fillRect(x + 8, y - 5, 10, 5);
+        ctx.fillStyle = "#ff0000";
+        ctx.fillRect(x + 22, y - 5, 10, 5);
+        // Label
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 8px Geist Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("POLICE", x + width / 2, y + height / 2);
+      } else {
+        // Truck: dark gray
+        ctx.fillStyle = "#1a1a2e";
+        ctx.strokeStyle = "#ff6600";
+        ctx.shadowColor = "#ff6600";
+        ctx.shadowBlur = 8;
+        ctx.lineWidth = 2;
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, width, height);
+        ctx.shadowBlur = 0;
+        // Label
+        ctx.fillStyle = "#ff6600";
+        ctx.font = "bold 8px Geist Mono, monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("TRUCK", x + width / 2, y + height / 2);
+      }
+      ctx.textAlign = "left";
+    }
   }
 
   function drawTerrain(
@@ -1113,6 +1348,7 @@ export default function BikeGame() {
     state: GameState,
     W: number,
     H: number,
+    isNight = false,
   ) {
     const cam = state.camera;
     const bottomY = cam.y + H + 200;
@@ -1148,9 +1384,12 @@ export default function BikeGame() {
       for (let i = 1; i < pts.length; i++) {
         ctx.lineTo(pts[i].x, pts[i].y);
       }
-      ctx.strokeStyle = COLOR_TERRAIN_OUTLINE;
+      const outlineColor = isNight
+        ? COLOR_TERRAIN_OUTLINE_NIGHT
+        : COLOR_TERRAIN_OUTLINE;
+      ctx.strokeStyle = outlineColor;
       ctx.lineWidth = 2.5;
-      ctx.shadowColor = COLOR_TERRAIN_OUTLINE;
+      ctx.shadowColor = outlineColor;
       ctx.shadowBlur = 8;
       ctx.stroke();
       ctx.shadowBlur = 0;
@@ -1389,20 +1628,51 @@ export default function BikeGame() {
     W: number,
     _H: number,
     _timestamp: number,
+    currentLvl = 1,
   ) {
     // HUD background panel
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.beginPath();
-    ctx.roundRect(16, 16, 220, 100, 8);
+    ctx.roundRect(16, 16, 240, 120, 8);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(16, 16, 220, 100, 8);
+    ctx.roundRect(16, 16, 240, 120, 8);
     ctx.stroke();
 
     ctx.font = "bold 13px 'Geist Mono', monospace";
+    ctx.shadowBlur = 0;
+
+    // Level display
+    const lvlColor =
+      currentLvl >= 21
+        ? "#ff0040"
+        : currentLvl >= 11
+          ? "#ff6600"
+          : currentLvl >= 6
+            ? "#ffff00"
+            : "#39ff14";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText("LVL:", 28, 36);
+    ctx.fillStyle = lvlColor;
+    ctx.shadowColor = lvlColor;
+    ctx.shadowBlur = 6;
+    ctx.fillText(`${currentLvl}`, 80, 36);
+    ctx.shadowBlur = 0;
+
+    // Mission distance
+    const mDist =
+      state.missionDistance > 0 ? state.missionDistance : currentLvl * 800;
+    const distTraveled = Math.floor(state.distance / 10);
+    const distTarget = Math.floor(mDist / 10);
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText("DIST:", 28, 56);
+    ctx.fillStyle = distTraveled >= distTarget ? "#39ff14" : COLOR_HUD;
+    ctx.shadowColor = distTraveled >= distTarget ? "#39ff14" : COLOR_HUD;
+    ctx.shadowBlur = 5;
+    ctx.fillText(`${distTraveled}m/${distTarget}m`, 80, 56);
     ctx.shadowBlur = 0;
 
     const lines = [
@@ -1413,15 +1683,10 @@ export default function BikeGame() {
         value: `${Math.floor(state.speed)} km/h`,
         color: "#39ff14",
       },
-      {
-        label: "HEIGHT",
-        value: `${Math.floor(state.height)}m`,
-        color: "#ffff00",
-      },
     ];
 
     lines.forEach((line, i) => {
-      const y = 36 + i * 20;
+      const y = 76 + i * 20;
       ctx.fillStyle = "rgba(255,255,255,0.4)";
       ctx.fillText(`${line.label}:`, 28, y);
       ctx.fillStyle = line.color;
@@ -1522,12 +1787,43 @@ export default function BikeGame() {
       ctx.textAlign = "left";
     }
 
-    // Distance indicator
-    ctx.font = "11px 'Geist Mono', monospace";
-    ctx.fillStyle = "rgba(0,255,255,0.5)";
-    ctx.textAlign = "right";
-    ctx.fillText(`${Math.floor(state.distance / 10)}m`, W - 20, 32);
-    ctx.textAlign = "left";
+    // Level-up banner
+    if (state.leveledUp) {
+      const progress = state.levelUpTimer / 3.0;
+      const alpha = Math.min(1, progress * 2);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(W / 2, _H / 2 - 60);
+      const bannerScale = 1 + (1 - progress) * 0.2;
+      ctx.scale(bannerScale, bannerScale);
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 40;
+      ctx.font = "bold 42px 'Bricolage Grotesque', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffd700";
+      ctx.fillText("🏆 LEVEL UP!", 0, -20);
+      ctx.font = "bold 28px 'Bricolage Grotesque', sans-serif";
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(`LEVEL ${state.levelUpLevel}`, 0, 22);
+      ctx.restore();
+      ctx.textAlign = "left";
+    }
+
+    // Night/rain mode indicator
+    if (currentLvl >= 21) {
+      ctx.font = "11px 'Geist Mono', monospace";
+      ctx.fillStyle = "rgba(0,136,255,0.7)";
+      ctx.textAlign = "right";
+      ctx.fillText("🌧 NIGHT MODE", W - 20, 52);
+      ctx.textAlign = "left";
+    } else if (currentLvl >= 11) {
+      ctx.font = "11px 'Geist Mono', monospace";
+      ctx.fillStyle = "rgba(255,102,0,0.7)";
+      ctx.textAlign = "right";
+      ctx.fillText("⚠ TRAFFIC AHEAD", W - 20, 52);
+      ctx.textAlign = "left";
+    }
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -1602,6 +1898,54 @@ export default function BikeGame() {
         data-ocid="game.canvas_target"
         style={{ display: "block", width: "100%", height: "100%" }}
       />
+
+      {/* Back to Menu button — top-left corner */}
+      {onBackToMenu && (
+        <button
+          type="button"
+          data-ocid="game.menu_button"
+          onClick={onBackToMenu}
+          title="Back to Menu"
+          aria-label="Back to Menu"
+          style={{
+            position: "absolute",
+            top: 16,
+            left: 16,
+            height: 40,
+            padding: "0 14px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            background: "rgba(0, 0, 0, 0.55)",
+            border: "1.5px solid rgba(0, 255, 255, 0.55)",
+            borderRadius: 8,
+            cursor: "pointer",
+            color: "#00ffff",
+            fontSize: 12,
+            fontFamily: "Geist Mono, monospace",
+            fontWeight: 700,
+            transition: "color 0.15s, border-color 0.15s, background 0.15s",
+            zIndex: 10,
+            letterSpacing: "0.06em",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(0,255,255,0.12)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "rgba(0,255,255,0.9)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background =
+              "rgba(0,0,0,0.55)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor =
+              "rgba(0,255,255,0.55)";
+          }}
+        >
+          <Menu size={14} />
+          MENU
+        </button>
+      )}
 
       {/* Mute toggle — sits over canvas, top-right corner */}
       <button
