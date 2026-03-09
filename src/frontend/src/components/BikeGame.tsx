@@ -822,23 +822,15 @@ export default function BikeGame({
         state.rotationAccum += bike.angularVel * dt;
       }
 
-      // Wheelie detection
+      // Wheelie detection (record only, no score)
       if (rearContact && !frontContact) {
         state.wheelieTimer += dt;
         if (state.wheelieTimer > MIN_WHEELIE_TIME) {
-          const pts = Math.floor(10 * state.combo);
-          state.score += pts;
           if (
-            Math.floor(state.wheelieTimer * 10) !==
-            Math.floor((state.wheelieTimer - dt) * 10)
+            state.stuntsPerformed[state.stuntsPerformed.length - 1] !==
+            "WHEELIE!"
           ) {
-            // Occasional bonus tick
-            if (
-              state.stuntsPerformed[state.stuntsPerformed.length - 1] !==
-              "WHEELIE!"
-            ) {
-              recordStunt(state, "WHEELIE!");
-            }
+            recordStunt(state, "WHEELIE!");
           }
         }
       } else {
@@ -849,23 +841,15 @@ export default function BikeGame({
       if (wasAirborne && (rearContact || frontContact)) {
         const _airSecs = state.airTimeAccum;
 
-        // Check flips
+        // Check flips (record stunt name only, no score/combo change)
         const flips = Math.floor(
           Math.abs(state.rotationAccum) / FLIP_THRESHOLD,
         );
         if (flips > 0) {
           const isBackflip = state.rotationAccum < 0;
           for (let i = 0; i < flips; i++) {
-            const pts = 500 * state.combo;
-            state.score += pts;
-            state.combo = Math.min(10, state.combo + 1);
             recordStunt(state, isBackflip ? "BACKFLIP" : "FRONTFLIP");
           }
-        }
-
-        // Combo: if no stunts, reset
-        if (flips === 0 && state.wheelieTimer < MIN_WHEELIE_TIME) {
-          state.combo = Math.max(1, state.combo - 0);
         }
 
         // Spark on hard landing
@@ -1872,13 +1856,13 @@ export default function BikeGame({
     // HUD background panel
     ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.beginPath();
-    ctx.roundRect(16, 16, 240, 80, 8);
+    ctx.roundRect(16, 16, 240, 62, 8);
     ctx.fill();
 
     ctx.strokeStyle = "rgba(0, 255, 255, 0.3)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.roundRect(16, 16, 240, 80, 8);
+    ctx.roundRect(16, 16, 240, 62, 8);
     ctx.stroke();
 
     ctx.font = "bold 13px 'Geist Mono', monospace";
@@ -1886,7 +1870,6 @@ export default function BikeGame({
 
     const lines = [
       { label: "SCORE", value: state.score.toLocaleString(), color: COLOR_HUD },
-      { label: "COMBO", value: `x${state.combo}`, color: "#ff00ff" },
       {
         label: "SPEED",
         value: `${Math.floor(state.speed)} km/h`,

@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 interface PremiumScreenProps {
   isPremium: boolean;
   onActivate: () => void;
@@ -8,11 +6,8 @@ interface PremiumScreenProps {
 
 export default function PremiumScreen({
   isPremium,
-  onActivate,
   onBack,
 }: PremiumScreenProps) {
-  const [showConfirm, setShowConfirm] = useState(false);
-
   const benefits = [
     {
       icon: "🚗",
@@ -393,107 +388,9 @@ export default function PremiumScreen({
                       lineHeight: 1.5,
                     }}
                   >
-                    Pay ₹29 and click "Already Paid?" below
-                    <br />
-                    to activate your premium instantly.
+                    Pay ₹29 or more to get lifetime premium access.
                   </div>
                 </div>
-
-                {/* Already paid button */}
-                {!showConfirm ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirm(true)}
-                    style={{
-                      width: "100%",
-                      padding: "14px",
-                      background: "rgba(255,215,0,0.1)",
-                      border: "1.5px solid rgba(255,215,0,0.5)",
-                      borderRadius: 10,
-                      color: "#ffd700",
-                      fontSize: 15,
-                      fontWeight: 800,
-                      fontFamily: "Bricolage Grotesque, sans-serif",
-                      letterSpacing: "0.04em",
-                      cursor: "pointer",
-                      transition: "all 0.18s",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "rgba(255,215,0,0.18)";
-                      e.currentTarget.style.boxShadow =
-                        "0 0 20px rgba(255,215,0,0.3)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "rgba(255,215,0,0.1)";
-                      e.currentTarget.style.boxShadow = "none";
-                    }}
-                  >
-                    ✅ Already Paid? Activate Premium
-                  </button>
-                ) : (
-                  <div
-                    style={{
-                      width: "100%",
-                      padding: "16px",
-                      background: "rgba(57,255,20,0.08)",
-                      border: "1.5px solid rgba(57,255,20,0.35)",
-                      borderRadius: 10,
-                      textAlign: "center",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: "Geist Mono, monospace",
-                        fontSize: 12,
-                        color: "rgba(255,255,255,0.7)",
-                        marginBottom: 12,
-                      }}
-                    >
-                      Confirm you've paid ₹29 via UPI?
-                    </div>
-                    <div style={{ display: "flex", gap: 10 }}>
-                      <button
-                        type="button"
-                        data-ocid="premium.activate_button"
-                        onClick={onActivate}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          background: "rgba(57,255,20,0.15)",
-                          border: "1.5px solid #39ff14",
-                          borderRadius: 8,
-                          color: "#39ff14",
-                          fontSize: 13,
-                          fontWeight: 800,
-                          fontFamily: "Geist Mono, monospace",
-                          cursor: "pointer",
-                          transition: "all 0.18s",
-                        }}
-                      >
-                        ✓ YES, ACTIVATE
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirm(false)}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          background: "rgba(255,68,68,0.1)",
-                          border: "1.5px solid rgba(255,68,68,0.4)",
-                          borderRadius: 8,
-                          color: "#ff6666",
-                          fontSize: 13,
-                          fontWeight: 700,
-                          fontFamily: "Geist Mono, monospace",
-                          cursor: "pointer",
-                          transition: "all 0.18s",
-                        }}
-                      >
-                        CANCEL
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}
